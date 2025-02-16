@@ -29,4 +29,4 @@ Features to add:
 Computational issues
 - Can't use full 90k songs and use the tfidf matrix
 - had to use subset of games (decided to use games with achievements to recommend)
-- 
+- sort by price, user can select a range for the price they want (cheaper than) 
