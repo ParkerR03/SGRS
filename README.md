@@ -1,6 +1,8 @@
 # SGRS
 Steam Game Recommendation System
 
+Dataset - https://www.kaggle.com/datasets/fronkongames/steam-games-dataset 
+
 
 V1 - 
 Current Backend Features:
