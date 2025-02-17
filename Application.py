@@ -6,16 +6,21 @@ import requests
 from io import BytesIO
 from recfunctions import get_recommendations, get_game_id, rec_data
 
-# Load the games data
-data = pd.read_csv('Data/Full_games.csv')
 
 class GameSearchApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Game Recommendation System")
         
-        # Set window size
-        self.root.geometry("600x1000")
+        # Make window fullscreen
+        self.root.state('zoomed')  # For Windows
+        # self.root.attributes('-zoomed', True)  # For Linux
+        # self.root.attributes('-fullscreen', True)  # For Mac (or alternative for all platforms)
+        
+        # Configure both columns to have equal weight
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=0)  # scrollbar column
+        self.root.grid_rowconfigure(0, weight=1)
         
         # Import recommendation functions and data
         self.get_recommendations = get_recommendations
@@ -23,47 +28,131 @@ class GameSearchApp:
         self.rec_data = rec_data
         
         # Load the games data
-        self.data = pd.read_csv('Data/Full_games.csv')
+        self.data = pd.read_csv('Data/rec_allgames.csv')
         self.selected_games = []
         
+        # Create main container frame
+        self.container = ttk.Frame(root)
+        self.container.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        self.container.grid_columnconfigure(0, weight=1)
+        self.container.grid_rowconfigure(0, weight=1)
+        
         # Create canvas with scrollbar
-        self.canvas = tk.Canvas(root)
-        self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
+        self.canvas = tk.Canvas(self.container)
+        self.scrollbar = ttk.Scrollbar(self.container, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
         
         # Configure the canvas
         self.scrollable_frame.bind(
             "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            lambda e: self.canvas.configure(
+                scrollregion=(0, 0, e.width, e.height)  # Set top boundary to 0
+            )
         )
         
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        # Add middle-click scrolling bindings
+        self.canvas.bind('<Button-2>', self._start_scroll)  # Middle click
+        self.canvas.bind('<B2-Motion>', self._do_scroll)    # Middle click and drag
+        self.canvas.bind('<MouseWheel>', self._on_mousewheel)  # Mouse wheel
+        
+        # For Linux systems that use Button-4 and Button-5 for mouse wheel
+        self.canvas.bind('<Button-4>', lambda e: self.canvas.yview_scroll(-1, 'units'))
+        self.canvas.bind('<Button-5>', lambda e: self.canvas.yview_scroll(1, 'units'))
+        
+        # Center the window in the canvas
+        self.canvas_frame = self.canvas.create_window(
+            (0, 0),
+            window=self.scrollable_frame,
+            anchor="nw",
+            width=self.canvas.winfo_width()  # Make frame fill canvas width
+        )
+        
+        # Update canvas width when window is resized
+        self.canvas.bind('<Configure>', self.on_canvas_configure)
+        
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         
         # Pack the scrollbar and canvas
-        self.scrollbar.pack(side="right", fill="y")
-        self.canvas.pack(side="left", fill="both", expand=True)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
         
-        # Create main frame inside scrollable frame with more padding
+        # Configure scrollable_frame to center its contents
+        self.scrollable_frame.grid_columnconfigure(0, weight=1)
+        
+        # Create main frame inside scrollable frame
         self.main_frame = ttk.Frame(self.scrollable_frame)
-        self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.main_frame.grid(row=0, column=0, sticky="n", padx=20)
         
         # Add title/instructions with larger font and padding
         self.instructions = ttk.Label(
             self.main_frame, 
-            text="Game Recommendation System\nPlease select 3 games you enjoy to receive recommendations",
+            text="Game Recommendation System\nSelect up to 3 games you enjoy to receive recommendations",
             font=('Arial', 14),
             justify='center'
         )
         self.instructions.grid(row=0, column=0, columnspan=2, padx=20, pady=20)
         
+        # Add filters frame
+        self.filters_frame = ttk.Frame(self.main_frame)
+        self.filters_frame.grid(row=1, column=0, columnspan=2, pady=(0, 20))
+        
+        # Number of recommendations selector
+        self.rec_label = ttk.Label(
+            self.filters_frame,
+            text="Number of recommendations:",
+            font=('Arial', 11)
+        )
+        self.rec_label.pack(side='left', padx=5)
+        
+        self.rec_count = ttk.Combobox(
+            self.filters_frame,
+            values=[5, 6, 7, 8, 9, 10],
+            width=5,
+            state='readonly'
+        )
+        self.rec_count.set(5)
+        self.rec_count.pack(side='left', padx=(0, 20))
+        
+        # Price filter
+        self.price_label = ttk.Label(
+            self.filters_frame,
+            text="Max price ($):",
+            font=('Arial', 11)
+        )
+        self.price_label.pack(side='left', padx=5)
+        
+        self.price_var = tk.StringVar()
+        self.price_entry = ttk.Entry(
+            self.filters_frame,
+            textvariable=self.price_var,
+            width=5
+        )
+        self.price_entry.pack(side='left', padx=(0, 20))
+        
+        # Wilson score filter
+        self.wilson_label = ttk.Label(
+            self.filters_frame,
+            text="Min wilson score:",
+            font=('Arial', 11)
+        )
+        self.wilson_label.pack(side='left', padx=5)
+        
+        wilson_values = [round(x/10, 1) for x in range(0, 10)]  # Creates [0.0, 0.1, 0.2, ..., 0.9]
+        self.wilson_var = ttk.Combobox(
+            self.filters_frame,
+            values=wilson_values,
+            width=5,
+            state='readonly'
+        )
+        self.wilson_var.pack(side='left')
+        
         # Create main container frame
         self.left_frame = ttk.Frame(self.main_frame)
-        self.left_frame.grid(row=1, column=0, padx=50, pady=10)
+        self.left_frame.grid(row=2, column=0, columnspan=2, padx=50, pady=10)
         
         # Configure column weight to center content
         self.main_frame.columnconfigure(0, weight=1)
-        self.main_frame.columnconfigure(1, weight=1)
+        self.main_frame.columnconfigure(1, weight=1)  # scrollbar column
         
         # Move search elements to left frame with more spacing
         self.search_var = tk.StringVar()
@@ -84,6 +173,9 @@ class GameSearchApp:
             font=('Arial', 10)
         )
         self.search_entry.grid(row=1, column=0, padx=5, pady=(0, 15))
+        
+        # Configure left_frame to center its contents
+        self.left_frame.grid_columnconfigure(0, weight=1)
         
         # Search image below search bar
         self.image_frame = ttk.Frame(self.left_frame)
@@ -108,6 +200,11 @@ class GameSearchApp:
         )
         self.listbox.grid(row=4, column=0, padx=5, pady=(0, 20))
         
+        # Add listbox scroll binding
+        self.listbox.bind('<MouseWheel>', self._on_listbox_scroll)
+        self.listbox.bind('<Button-4>', lambda e: self._on_listbox_scroll_linux(e, -1))
+        self.listbox.bind('<Button-5>', lambda e: self._on_listbox_scroll_linux(e, 1))
+        
         # Selected games section
         self.selected_label = ttk.Label(
             self.left_frame, 
@@ -123,6 +220,11 @@ class GameSearchApp:
             font=('Arial', 10)
         )
         self.selected_listbox.grid(row=6, column=0, padx=5, pady=(0, 20))
+        
+        # Add selected listbox scroll binding
+        self.selected_listbox.bind('<MouseWheel>', self._on_listbox_scroll)
+        self.selected_listbox.bind('<Button-4>', lambda e: self._on_listbox_scroll_linux(e, -1))
+        self.selected_listbox.bind('<Button-5>', lambda e: self._on_listbox_scroll_linux(e, 1))
         
         # Selected games images below selected games box
         self.selected_images_frame = ttk.Frame(self.left_frame)
@@ -155,11 +257,11 @@ class GameSearchApp:
             command=self.show_recommendations,
             state='disabled'
         )
-        self.recommend_button.grid(row=2, column=0, columnspan=2, pady=30)
+        self.recommend_button.grid(row=3, column=0, columnspan=2, pady=30)
         
         # Recommendations frame
         self.recommendations_frame = ttk.Frame(self.main_frame)
-        self.recommendations_frame.grid(row=8, column=0, columnspan=2, padx=20, pady=20, sticky='nsew')
+        self.recommendations_frame.grid(row=4, column=0, columnspan=2, padx=20, pady=20, sticky='nsew')
         
         # Configure the main_frame grid to center the recommendations
         self.main_frame.grid_columnconfigure(0, weight=1)
@@ -177,7 +279,29 @@ class GameSearchApp:
         
         # List to store recommendation image labels
         self.recommendation_images = []
-    
+        
+        # Add mousewheel bindings to all relevant widgets
+        widgets_to_bind = [self.root, self.canvas, self.scrollable_frame, 
+                          self.main_frame, self.left_frame]
+        
+        for widget in widgets_to_bind:
+            widget.bind('<MouseWheel>', self._on_mousewheel)  # Windows/MacOS
+            widget.bind('<Button-4>', lambda e: self.canvas.yview_scroll(-1, 'units'))  # Linux
+            widget.bind('<Button-5>', lambda e: self.canvas.yview_scroll(1, 'units'))   # Linux
+        
+        # Bind mousewheel for any future widgets in the scrollable frame
+        self.scrollable_frame.bind_all('<MouseWheel>', self._on_mousewheel)
+        self.scrollable_frame.bind_all('<Button-4>', lambda e: self.canvas.yview_scroll(-1, 'units'))
+        self.scrollable_frame.bind_all('<Button-5>', lambda e: self.canvas.yview_scroll(1, 'units'))
+        
+    def _start_scroll(self, event):
+        """Store the initial position when middle click is pressed"""
+        self.canvas.scan_mark(event.x, event.y)
+
+    def _do_scroll(self, event):
+        """Drag the canvas content when middle click is held"""
+        self.canvas.scan_dragto(event.x, event.y, gain=1)
+
     def _on_mousewheel(self, event):
         """Handle mousewheel scrolling"""
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
@@ -220,6 +344,8 @@ class GameSearchApp:
         # Filter games based on search term
         if search_term:
             matches = self.data[self.data['Name'].str.lower().str.contains(search_term, na=False)]
+            # Sort matches by wilson_score in descending order
+            matches = matches.sort_values('wilson_score', ascending=False)
             for _, game in matches.iterrows():
                 if len(matches) > 100:  # Limit results to prevent lag
                     break
@@ -255,7 +381,8 @@ class GameSearchApp:
             
         self.selected_label.config(text=f"Selected Games ({len(self.selected_games)}/3):")
         
-        if len(self.selected_games) == 3:
+        # Enable recommend button if at least one game is selected
+        if len(self.selected_games) > 0:
             self.recommend_button.config(state='normal')
         else:
             self.recommend_button.config(state='disabled')
@@ -291,16 +418,37 @@ class GameSearchApp:
             # Get AppIDs of selected games
             game_ids = [int(game.split("ID: ")[1].rstrip(")")) for game in self.selected_games]
             
-            if len(game_ids) != 3:
-                raise ValueError(f"Need exactly 3 games for recommendations.")
+            if len(game_ids) < 1:
+                raise ValueError("Please select at least one game for recommendations.")
             
             print(f"Processing recommendations for game IDs: {game_ids}")
             
+            # Get filter values
+            max_price = None
+            if self.price_var.get().strip():
+                try:
+                    max_price = float(self.price_var.get())
+                except ValueError:
+                    raise ValueError("Invalid price value")
+                
+            min_wilson = None
+            if self.wilson_var.get():
+                try:
+                    min_wilson = float(self.wilson_var.get())
+                except ValueError:
+                    raise ValueError("Invalid wilson score value")
+            
             # Get recommendations using the existing function
-            recommended_indices, similarity_scores = self.get_recommendations(game_ids, n=3)
+            n_recommendations = int(self.rec_count.get())
+            recommended_indices, similarity_scores = self.get_recommendations(
+                game_ids, 
+                n=n_recommendations,
+                max_price=max_price,
+                min_wilson_score=min_wilson
+            )
             
             if not recommended_indices:
-                raise ValueError("No recommendations found. Please try different games.")
+                raise ValueError("No recommendations found matching the specified criteria")
             
             # Get recommended games data
             recommended_games = self.rec_data.iloc[recommended_indices]
@@ -325,13 +473,16 @@ class GameSearchApp:
             
             # Display each recommended game
             for idx, (_, game) in enumerate(recommended_games.iterrows()):
+                row = idx // 3  # Integer division to determine row
+                col = idx % 3   # Modulo to determine column
+                
                 game_frame = ttk.Frame(cards_frame)
-                game_frame.grid(row=0, column=idx, padx=20, pady=5)
+                game_frame.grid(row=row, column=col, padx=20, pady=5)
                 
                 # Add game name and similarity score
                 name_label = ttk.Label(
                     game_frame, 
-                    text=f"{game['Name']}\nSimilarity: {similarity_scores[idx]:.2f}",
+                    text=f"{game['Name']}\nSimilarity: {similarity_scores[idx]:.2f} | Price: ${game['Price']:.2f}",
                     wraplength=300,
                     justify='center',
                     font=('Arial', 10)
@@ -366,6 +517,23 @@ class GameSearchApp:
                 justify='center'
             )
             error_label.pack(pady=20)
+
+    def on_canvas_configure(self, event):
+        """Update the canvas window size when the canvas is resized"""
+        # Update the width of the canvas window
+        self.canvas.itemconfig(self.canvas_frame, width=event.width)
+
+    def _on_listbox_scroll(self, event):
+        """Handle mousewheel scrolling for listboxes"""
+        widget = event.widget
+        widget.yview_scroll(int(-1*(event.delta/120)), "units")
+        return "break"  # Prevents event from propagating to parent
+
+    def _on_listbox_scroll_linux(self, event, direction):
+        """Handle mousewheel scrolling for listboxes on Linux"""
+        widget = event.widget
+        widget.yview_scroll(direction, "units")
+        return "break"  # Prevents event from propagating to parent
 
 # Create and run the application
 if __name__ == "__main__":

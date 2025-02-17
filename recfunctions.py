@@ -6,15 +6,12 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics.pairwise import cosine_similarity
 import joblib
 
-full_data = pd.read_csv('Data/Recommendation_allGames.csv')
-rec_data = pd.read_csv('Data/Recommendation_WithAchievements.csv')
+full_data = pd.read_csv('Data/rec_allgames.csv')
+rec_data = pd.read_csv('Data/rec_data.csv')
 scaler = joblib.load('Stuff/scaler.pkl')            # price and days since reference .5 weight
 scaler1 = joblib.load('Stuff/scaler1.pkl')          # wilson score .7 weight
 vectorizer = joblib.load('Stuff/vectorizer.pkl')    # combined info .8 weight
 weighted_features = joblib.load('Stuff/weighted_features.pkl')
-
-
-
 
 
 def preprocess_user_input(user_games, full_data = full_data, vectorizer = vectorizer, scaler = scaler, scaler1 = scaler1):
@@ -47,9 +44,7 @@ def preprocess_user_input(user_games, full_data = full_data, vectorizer = vector
         
         combined_vector = hstack([combined_info_vector, numeric_features_scaled, numeric_features1_scaled])
         
-        combined_vector = combined_vector.toarray()
-        
-        user_feature_vectors.append(combined_vector)
+        user_feature_vectors.append(combined_vector.toarray())
     
     if not user_feature_vectors:
         raise ValueError("No valid games found to process")
@@ -59,12 +54,18 @@ def preprocess_user_input(user_games, full_data = full_data, vectorizer = vector
     return user_feature_vectors_avg
 
 
-
-# Have to update this to make it so it only recommends games that are not in the user's list and only those ones.
-def get_recommendations(user_games, n = 5, data = rec_data, weighted_features = weighted_features):
+def get_recommendations(user_games, n=5, data=rec_data, weighted_features=weighted_features, max_price=None, min_wilson_score=None):
     '''
-    Takes the averaged feature vector representation of the user-selected games and returns the top n (default = 5) recommendations
-    from the rec_data dataset
+    Takes the averaged feature vector representation of the user-selected games and returns the top n recommendations
+    from the rec_data dataset.
+    
+    Parameters:
+    - user_games: list of game IDs
+    - n: number of recommendations to return (default=5)
+    - data: dataset to pull recommendations from
+    - weighted_features: pre-computed feature matrix
+    - max_price: maximum price filter (optional)
+    - min_wilson_score: minimum wilson score filter (optional)
     '''
     # Get the average feature vector from full_data games
     try:
@@ -83,15 +84,24 @@ def get_recommendations(user_games, n = 5, data = rec_data, weighted_features = 
     # Set similarity scores of user's games to -1 to exclude them
     similarity_scores_flat[user_game_indices] = -1
     
+    # Apply price filter if specified
+    if max_price is not None:
+        price_filter_indices = data[data['Price'] > max_price].index
+        similarity_scores_flat[price_filter_indices] = -1
+    
+    # Apply wilson score filter if specified
+    if min_wilson_score is not None:
+        wilson_filter_indices = data[data['wilson_score'] < min_wilson_score].index
+        similarity_scores_flat[wilson_filter_indices] = -1
+    
     # Get top n recommendations
     top_indices = similarity_scores_flat.argsort()[::-1]  # Sort all indices by similarity score
-    top_indices = [i for i in top_indices if i not in user_game_indices][:n]  # Exclude user games and pick top n
+    top_indices = [i for i in top_indices if similarity_scores_flat[i] != -1][:n]  # Exclude filtered games and pick top n
 
     if not top_indices:
-        raise ValueError("No recommendations found")
+        raise ValueError("No recommendations found matching the specified criteria")
 
     return top_indices, similarity_scores_flat[top_indices]
-
 
 
 def check_game(game):
@@ -123,7 +133,6 @@ def check_game(game):
         return True  # Unique game name found
 
 
-
 def get_game_id(game):
     '''
     input: game name or id
@@ -144,17 +153,16 @@ def get_game_id(game):
         return matching_game['AppID'].values[0]
 
 
+# def get_game_index(list_of_ids):
+#     '''
+#     Input: list of game ids
     
-def get_game_index(list_of_ids):
-    '''
-    Input: list of game ids
-    
-    Output: returns the index of the games in the dataset rec_data
-    '''
+#     Output: returns the index of the games in the dataset rec_data
+#     '''
 
-    game_indices = []
+#     game_indices = []
     
-    for game in list_of_ids:
-        game_indices.append(rec_data[rec_data['AppID'] == game].index[0])
+#     for game in list_of_ids:
+#         game_indices.append(rec_data[rec_data['AppID'] == game].index[0])
         
-    return game_indices
+#     return game_indices
